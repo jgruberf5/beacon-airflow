@@ -65,7 +65,7 @@ class BeaconHook(BaseHook):
                 }
                 self.extras = self.connection.extra_dejson
                 url = "https://%s/%s/svc-auth/login" % (
-                    self.extras['endpoint'], self.extras['version'])
+                    self.connection.host, self.connection.schema)
                 response = requests.post(
                     url, headers=headers, data=json.dumps(data))
                 if response.status_code < 300:
@@ -89,7 +89,7 @@ class BeaconHook(BaseHook):
                 "Authorization": "Bearer %s" % self.token
             }
             url = "https://%s/%s/svc-account/user" % (
-                self.extras['endpoint'], self.extras['version'])
+                self.connection.host, self.connection.schema)
             response = requests.get(url, headers=headers)
             if response.status_code < 300:
                 data = response.json()
@@ -97,6 +97,20 @@ class BeaconHook(BaseHook):
                     'user_id': data['id'],
                     'account_id': data['primary_account_id']
                 }
+            elif response.status_code == 401:
+                self.get_service_token()
+                response = requests.get(url, headers=headers)
+                if response.status_code < 300:
+                    data = response.json()
+                    return {
+                        'user_id': data['id'],
+                        'account_id': data['primary_account_id']
+                    }
+                else:
+                    http_ex = HTTPError(
+                        'error retrieving f5 Beacon account: %d: %s' % response.status_code, response.content)
+                    http_ex.status_code = response.status_code
+                    raise http_ex
             else:
                 http_ex = HTTPError(
                     'error retrieving f5 Beacon account: %d: %s' % response.status_code, response.content)
@@ -119,7 +133,7 @@ class BeaconHook(BaseHook):
                 "X-F5aas-Preferred-Account-Id": account_id
             }
             url = "https://%s/beacon/%s/metrics" % (
-                self.extras['endpoint'], self.extras['version'])
+                self.connection.host, self.connection.schema)
             data = {
                 "query": "SHOW MEASUREMENTS"
             }
@@ -133,6 +147,23 @@ class BeaconHook(BaseHook):
                     for value in values:
                         return_names.append(value[0])
                 return return_names
+            elif response.status_code == 401:
+                self.get_service_token()
+                response = requests.post(
+                    url, headers=headers, data=json.dumps(data))
+                if response.status_code < 300:
+                    return_names = []
+                    resobj = response.json()['Results'][0]
+                    if resobj['Series']:
+                        values = resobj['Series'][0]['values']
+                        for value in values:
+                            return_names.append(value[0])
+                    return return_names
+                else:
+                    http_ex = HTTPError(
+                        'error retrieving f5 Beacon measurements: %d: %s' % response.status_code, response.content)
+                    http_ex.status_code = response.status_code
+                    raise http_ex
             else:
                 http_ex = HTTPError(
                     'error retrieving f5 Beacon measurements: %d: %s' % response.status_code, response.content)
@@ -155,7 +186,7 @@ class BeaconHook(BaseHook):
                 "X-F5aas-Preferred-Account-Id": account_id
             }
             url = "https://%s/beacon/%s/metrics" % (
-                self.extras['endpoint'], self.extras['version'])
+                self.connection.host, self.connection.schema)
             data = {
                 "query": query
             }
@@ -165,6 +196,14 @@ class BeaconHook(BaseHook):
                 url, headers=headers, data=json.dumps(data))
             if response.status_code < 300:
                 return response.content.decode()
+            elif response.status_code == 401:
+                response = requests.post(
+                    url, headers=headers, data=json.dumps(data))
+                if response.status_code < 300:
+                    return response.content.decode()
+                else:
+                    raise AirflowException(
+                        'error retrieving f5 Beacon measurements: %d: %s' % response.status_code, response.content)
             else:
                 raise AirflowException(
                     'error retrieving f5 Beacon measurements: %d: %s' % response.status_code, response.content)

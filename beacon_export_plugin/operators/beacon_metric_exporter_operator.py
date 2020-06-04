@@ -58,7 +58,7 @@ class F5BeaconMetricQueryExporterOperator(BaseOperator):
         hook = BeaconHook(self.beacon_conn_id)
         connection = hook.get_conn()
         self.log.info('Executing extract metrics from f5 Beacon account %s on %s into: %s',
-                      hook.extras['account_id'], self.date, self.destination_bucket)
+                      hook.extras['account_id'], self.date, self.destination_dir)
         known_measurements = hook.get_measurements()
         self.log.info('found %s measurement for f5 Beacon account %s',
                       known_measurements, hook.extras['account_id'])
