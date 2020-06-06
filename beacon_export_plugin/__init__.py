@@ -21,10 +21,11 @@ This module contains F5 Beacon Plugin definition
 from airflow.plugins_manager import AirflowPlugin
 from beacon_export_plugin.hooks.beacon_hook import BeaconHook
 from beacon_export_plugin.operators.beacon_metric_exporter_operator import F5BeaconMetricQueryExporterOperator
+from beacon_export_plugin.operators.beacon_metric_exporter_operator import F5BeaconMetricQueryDailyExporterOperator
 
 class AirflowF5BeaconPlugin(AirflowPlugin):
     name = "f5_beacon_plugin"
-    operators = [F5BeaconMetricQueryExporterOperator]
+    operators = [F5BeaconMetricQueryExporterOperator, F5BeaconMetricQueryDailyExporterOperator]
     sensors = []
     hooks = [BeaconHook]
     executors = []

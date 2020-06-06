@@ -49,8 +49,6 @@ class BeaconHook(BaseHook):
         if not self.extras:
             self.connection = self.get_connection(self.conn_id)
             self.extras = self.connection.extra_dejson
-        if not self.token:
-            self.get_service_token()
 
     def get_service_token(self):
         self._init_call()
@@ -82,7 +80,8 @@ class BeaconHook(BaseHook):
                 'f5 beacon connection %s, does not have a login and password' % self.conn_id)
 
     def get_account_info(self):
-        self._init_call()
+        if not self.token:
+            self.get_service_token()
         try:
             headers = {
                 "Content-Type": "application/json",
@@ -108,12 +107,12 @@ class BeaconHook(BaseHook):
                     }
                 else:
                     http_ex = HTTPError(
-                        'error retrieving f5 Beacon account: %d: %s' % response.status_code, response.content)
+                        'error retrieving f5 Beacon account: %d: %s' % (response.status_code, response.content))
                     http_ex.status_code = response.status_code
                     raise http_ex
             else:
                 http_ex = HTTPError(
-                    'error retrieving f5 Beacon account: %d: %s' % response.status_code, response.content)
+                    'error retrieving f5 Beacon account: %d: %s' % (response.status_code, response.content))
                 http_ex.status_code = response.status_code
                 raise http_ex
         except Exception as ex:
@@ -121,7 +120,8 @@ class BeaconHook(BaseHook):
                 'exception retrieveing f5 Beacon account: %s' % ex)
 
     def get_measurements(self):
-        self._init_call()
+        if not self.token:
+            self.get_service_token()
         try:
             account_id = self.extras['account_id']
             if not account_id:
@@ -161,20 +161,21 @@ class BeaconHook(BaseHook):
                     return return_names
                 else:
                     http_ex = HTTPError(
-                        'error retrieving f5 Beacon measurements: %d: %s' % response.status_code, response.content)
+                        'error retrieving f5 Beacon measurements: %d: %s' % (response.status_code, response.content))
                     http_ex.status_code = response.status_code
                     raise http_ex
             else:
                 http_ex = HTTPError(
-                    'error retrieving f5 Beacon measurements: %d: %s' % response.status_code, response.content)
+                    'error retrieving f5 Beacon measurements: %d: %s' % (response.status_code, response.content))
                 http_ex.status_code = response.status_code
                 raise http_ex
         except Exception as ex:
             raise AirflowException(
-                'exception retrieveing measurements: %s' % ex)
+                'exception retrieveing f5 Beacon measurements: %s' % ex)
 
     def query_metric(self, query, output_line):
-        self._init_call()
+        if not self.token:
+            self.get_service_token()
         try:
             account_id = self.extras['account_id']
             if not account_id:
@@ -190,23 +191,24 @@ class BeaconHook(BaseHook):
             data = {
                 "query": query
             }
-            if self.output_line:
+            if output_line:
                 data["outputformat"] = "INFLUXLINE"
             response = requests.post(
                 url, headers=headers, data=json.dumps(data))
             if response.status_code < 300:
                 return response.content.decode()
             elif response.status_code == 401:
+                self.get_service_token()
                 response = requests.post(
                     url, headers=headers, data=json.dumps(data))
                 if response.status_code < 300:
                     return response.content.decode()
                 else:
                     raise AirflowException(
-                        'error retrieving f5 Beacon measurements: %d: %s' % response.status_code, response.content)
+                        'error retrieving f5 Beacon measurements: %d: %s' % (response.status_code, response.content))
             else:
                 raise AirflowException(
-                    'error retrieving f5 Beacon measurements: %d: %s' % response.status_code, response.content)
+                    'error retrieving f5 Beacon measurements: %d: %s' % (response.status_code, response.content))
         except Exception as ex:
             raise AirflowException(
                 'exception retrieveing measurements: %s' % ex)
