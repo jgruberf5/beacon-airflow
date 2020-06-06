@@ -52,7 +52,6 @@ class F5BeaconMetricQueryExporterOperator(BaseOperator):
         self.start_timestamp = start_timestamp
         self.stop_timestamp = stop_timestamp
         self.beacon_hook = BeaconHook(self.beacon_conn_id)
-        self.date = None
 
     def execute(self, context):
         connection = self.beacon_hook.get_conn()
@@ -61,6 +60,9 @@ class F5BeaconMetricQueryExporterOperator(BaseOperator):
         known_measurements = self.beacon_hook.get_measurements()
         self.log.info('found %s measurement for f5 Beacon account %s',
                       known_measurements, self.beacon_hook.extras['account_id'])
+        fn = self.get_metrics_fn(context['dag_run'].run_id)
+        if os.path.exists(fn):
+            os.unlink(fn)
         for measurement in known_measurements:
             self.get_measurement_records(
                 measurement, context['dag_run'].run_id)
@@ -99,9 +101,7 @@ class F5BeaconMetricQueryExporterOperator(BaseOperator):
                         'could not export f5 Beacon metric for measurement %s after reducing record limit to 1', measurement)
 
     def output_to_file(self, lines, run_id):
-        dest_dir = os.path.join(self.destination_dir, run_id)
-        os.makedirs(dest_dir, exist_ok=True)
-        fn = os.path.join(dest_dir, 'line_metrics.json')
+        fn = self.get_metrics_fn(run_id)
         of = open(fn, 'a+')
         largest_timestamp = 0
         for line in lines:
@@ -116,21 +116,26 @@ class F5BeaconMetricQueryExporterOperator(BaseOperator):
                 tags_list = []
                 for tn in data['tags']:
                     tags_list.append({
-                        'name': tn,
-                        'value': str(data['tags'][tn])
+                        'tag_name': tn,
+                        'tag_value': str(data['tags'][tn])
                     })
                 data['tags'] = tags_list
                 fields_list = []
                 for fn in data['fields']:
                     fields_list.append({
-                        'name': fn,
-                        'value': str(data['fields'][fn])
+                        'field_name': fn,
+                        'field_value': str(data['fields'][fn])
                     })
                 data['fields'] = fields_list
                 of.write("%s\n" % json.dumps(data))
         time.sleep(1)
         of.close()
         return largest_timestamp
+
+    def get_metrics_fn(self, run_id):
+        dest_dir = os.path.join(self.destination_dir, run_id)
+        os.makedirs(dest_dir, exist_ok=True)
+        return os.path.join(dest_dir, 'line_metrics.json')
 
     def write_schema(self, run_id):
         schema = [{'name': 'measurement', 'type': 'STRING', 'mode': 'REQUIRED'},
@@ -178,6 +183,9 @@ class F5BeaconMetricQueryDailyExporterOperator(F5BeaconMetricQueryExporterOperat
         self.start_timestamp = start_timestamp = int(time.mktime(
             datetime.datetime.strptime(self.date, '%Y-%m-%d').timetuple()))
         self.stop_timestamp = start_timestamp + 86400
+        fn = self.get_metrics_fn(context['dag_run'].run_id)
+        if os.path.exists(fn):
+            os.unlink(fn)
         for measurement in known_measurements:
             self.get_measurement_records(
                 measurement, context['dag_run'].run_id)
