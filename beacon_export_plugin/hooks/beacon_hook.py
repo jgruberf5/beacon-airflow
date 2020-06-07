@@ -38,20 +38,26 @@ class BeaconHook(BaseHook):
 
         self.connection = None
         self.token = None
-        self.extras = None
+        self.account_id = None
 
     def get_conn(self):
-        self.connection = self.get_connection(self.conn_id)
-        self.extras = self.connection.extra_dejson
+        if not self.connection:
+            self.connection = self.get_connection(self.conn_id)        
+        if not self.token:
+            self.token = self.get_service_token()
+        if not self.account_id:
+            extras = self.connection.extra_dejson
+            if not 'account_id' in extras:
+                self.get_account_info()
+            else:
+                self.account_id = extras['account_id']
         return self.connection
 
-    def _init_call(self):
-        if not self.extras:
-            self.connection = self.get_connection(self.conn_id)
-            self.extras = self.connection.extra_dejson
+    def update_token(self):
+        self.token = None
+        self.get_conn()
 
     def get_service_token(self):
-        self._init_call()
         if self.connection.login and self.connection.password:
             try:
                 headers = {
@@ -80,8 +86,6 @@ class BeaconHook(BaseHook):
                 'f5 beacon connection %s, does not have a login and password' % self.conn_id)
 
     def get_account_info(self):
-        if not self.token:
-            self.get_service_token()
         try:
             headers = {
                 "Content-Type": "application/json",
@@ -92,24 +96,7 @@ class BeaconHook(BaseHook):
             response = requests.get(url, headers=headers)
             if response.status_code < 300:
                 data = response.json()
-                return {
-                    'user_id': data['id'],
-                    'account_id': data['primary_account_id']
-                }
-            elif response.status_code == 401:
-                self.get_service_token()
-                response = requests.get(url, headers=headers)
-                if response.status_code < 300:
-                    data = response.json()
-                    return {
-                        'user_id': data['id'],
-                        'account_id': data['primary_account_id']
-                    }
-                else:
-                    http_ex = HTTPError(
-                        'error retrieving f5 Beacon account: %d: %s' % (response.status_code, response.content))
-                    http_ex.status_code = response.status_code
-                    raise http_ex
+                self.account_id = data['primary_account_id']
             else:
                 http_ex = HTTPError(
                     'error retrieving f5 Beacon account: %d: %s' % (response.status_code, response.content))
@@ -120,17 +107,15 @@ class BeaconHook(BaseHook):
                 'exception retrieveing f5 Beacon account: %s' % ex)
 
     def get_measurements(self):
-        if not self.token:
-            self.get_service_token()
+        self.get_conn()
         try:
-            account_id = self.extras['account_id']
-            if not account_id:
+            if not self.account_id:
                 raise AirflowException(
                     'can not retrieve known measurements from f5 Beacon without an account ID')
             headers = {
                 "Content-Type": "application/json",
                 "Authorization": "Bearer %s" % self.token,
-                "X-F5aas-Preferred-Account-Id": account_id
+                "X-F5aas-Preferred-Account-Id": self.account_id
             }
             url = "https://%s/beacon/%s/metrics" % (
                 self.connection.host, self.connection.schema)
@@ -148,7 +133,8 @@ class BeaconHook(BaseHook):
                         return_names.append(value[0])
                 return return_names
             elif response.status_code == 401:
-                self.get_service_token()
+                self.update_token()
+                headers['Authorization'] = "Bearer %s" % self.token
                 response = requests.post(
                     url, headers=headers, data=json.dumps(data))
                 if response.status_code < 300:
@@ -174,17 +160,15 @@ class BeaconHook(BaseHook):
                 'exception retrieveing f5 Beacon measurements: %s' % ex)
 
     def query_metric(self, query, output_line):
-        if not self.token:
-            self.get_service_token()
+        self.get_conn()
         try:
-            account_id = self.extras['account_id']
-            if not account_id:
+            if not self.account_id:
                 raise AirflowException(
                     'can not query metrics from f5 Beacon without an account ID')
             headers = {
                 "Content-Type": "application/json",
                 "Authorization": "Bearer %s" % self.token,
-                "X-F5aas-Preferred-Account-Id": account_id
+                "X-F5aas-Preferred-Account-Id": self.account_id
             }
             url = "https://%s/beacon/%s/metrics" % (
                 self.connection.host, self.connection.schema)
@@ -198,7 +182,8 @@ class BeaconHook(BaseHook):
             if response.status_code < 300:
                 return response.content.decode()
             elif response.status_code == 401:
-                self.get_service_token()
+                self.update_token()
+                headers['Authorization'] = "Bearer %s" % self.token
                 response = requests.post(
                     url, headers=headers, data=json.dumps(data))
                 if response.status_code < 300:
