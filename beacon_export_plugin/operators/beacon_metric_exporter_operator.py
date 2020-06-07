@@ -21,7 +21,6 @@ This module contains F5 Beacon metric API exporter
 import time
 import datetime
 import json
-import logging
 import os
 import subprocess
 
@@ -54,12 +53,15 @@ class F5BeaconMetricQueryExporterOperator(BaseOperator):
         self.beacon_hook = BeaconHook(self.beacon_conn_id)
 
     def execute(self, context):
-        connection = self.beacon_hook.get_conn()
+        conn = self.beacon_hook.get_conn()
+        account_id = 'primary'
+        if 'account_id' in conn.extra_dejson:
+            account_id = conn.extra_dejson['account_id']
         self.log.info('Executing extract metrics from f5 Beacon account %s between %s:%s into: %s',
-                      self.beacon_hook.extras['account_id'], self.start_timestamp, self.stop_timestamp, self.destination_dir)
+                      account_id, self.start_timestamp, self.stop_timestamp, self.destination_dir)
         known_measurements = self.beacon_hook.get_measurements()
         self.log.info('found %s measurement for f5 Beacon account %s',
-                      known_measurements, self.beacon_hook.extras['account_id'])
+                      known_measurements, account_id)
         fn = self.get_metrics_fn(context['dag_run'].run_id)
         if os.path.exists(fn):
             os.unlink(fn)
@@ -72,7 +74,7 @@ class F5BeaconMetricQueryExporterOperator(BaseOperator):
         batch_size = 9000
         have_records = True
         start_timestamp = int(self.start_timestamp)
-        stop_timestamp = int(self.stop_timestamp)
+        stop_timestamp = int(self.stop_timestamp) + 1
         offset_seconds = 0
         while have_records:
             if offset_seconds > 0:
@@ -174,12 +176,15 @@ class F5BeaconMetricQueryDailyExporterOperator(F5BeaconMetricQueryExporterOperat
 
     def execute(self, context):
         self.date = str(context.get("execution_date").date())
-        connection = self.beacon_hook.get_conn()
+        conn = self.beacon_hook.get_conn()
+        account_id = 'primary'
+        if 'account_id' in conn.extra_dejson:
+            account_id = conn.extra_dejson['account_id']
         self.log.info('Executing extract metrics from f5 Beacon account %s on %s into: %s',
-                      self.beacon_hook.extras['account_id'], self.date, self.destination_dir)
+                      account_id, self.date, self.destination_dir)
         known_measurements = self.beacon_hook.get_measurements()
         self.log.info('found %s measurement for f5 Beacon account %s',
-                      known_measurements, self.beacon_hook.extras['account_id'])
+                      known_measurements, account_id)
         self.start_timestamp = start_timestamp = int(time.mktime(
             datetime.datetime.strptime(self.date, '%Y-%m-%d').timetuple()))
         self.stop_timestamp = start_timestamp + 86400
@@ -190,3 +195,40 @@ class F5BeaconMetricQueryDailyExporterOperator(F5BeaconMetricQueryExporterOperat
             self.get_measurement_records(
                 measurement, context['dag_run'].run_id)
         self.write_schema(context['dag_run'].run_id)
+
+
+class F5BeaconMetricQueryHourlyExporterOperator(F5BeaconMetricQueryExporterOperator):
+    
+    @apply_defaults
+    def __init__(self,  # pylint: disable=too-many-arguments
+                 beacon_conn_id: str = 'f5_beacon_default',
+                 destination_dir="/home/airflow/gcs/data",
+                 *args,
+                 **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+
+        self.beacon_conn_id = beacon_conn_id
+        self.destination_dir = destination_dir
+        self.beacon_hook = BeaconHook(self.beacon_conn_id)
+
+    def execute(self, context):
+        conn = self.beacon_hook.get_conn()
+        account_id = 'primary'
+        if 'account_id' in conn.extra_dejson:
+            account_id = conn.extra_dejson['account_id']
+        self.stop_timestamp = int(time.mktime(context.get("execution_date").timetuple()))
+        self.start_timestamp = self.stop_timestamp - 3600
+        self.log.info('Executing extract metrics from f5 Beacon account %s for %s - %s into: %s',
+                      account_id, self.start_timestamp, self.stop_timestamp, self.destination_dir)
+        known_measurements = self.beacon_hook.get_measurements()
+        self.log.info('found %s measurement for f5 Beacon account %s',
+                      known_measurements, account_id)
+        fn = self.get_metrics_fn(context['dag_run'].run_id)
+        if os.path.exists(fn):
+            os.unlink(fn)
+        for measurement in known_measurements:
+            self.get_measurement_records(
+                measurement, context['dag_run'].run_id)
+        self.write_schema(context['dag_run'].run_id)
+
+

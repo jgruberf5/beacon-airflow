@@ -22,10 +22,13 @@ from airflow.plugins_manager import AirflowPlugin
 from beacon_export_plugin.hooks.beacon_hook import BeaconHook
 from beacon_export_plugin.operators.beacon_metric_exporter_operator import F5BeaconMetricQueryExporterOperator
 from beacon_export_plugin.operators.beacon_metric_exporter_operator import F5BeaconMetricQueryDailyExporterOperator
+from beacon_export_plugin.operators.beacon_metric_exporter_operator import F5BeaconMetricQueryHourlyExporterOperator
+
 
 class AirflowF5BeaconPlugin(AirflowPlugin):
     name = "f5_beacon_plugin"
-    operators = [F5BeaconMetricQueryExporterOperator, F5BeaconMetricQueryDailyExporterOperator]
+    operators = [F5BeaconMetricQueryExporterOperator,
+                 F5BeaconMetricQueryDailyExporterOperator, F5BeaconMetricQueryHourlyExporterOperator]
     sensors = []
     hooks = [BeaconHook]
     executors = []

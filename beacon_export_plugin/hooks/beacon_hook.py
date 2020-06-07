@@ -42,20 +42,21 @@ class BeaconHook(BaseHook):
 
     def get_conn(self):
         if not self.connection:
-            self.connection = self.get_connection(self.conn_id)        
+            self.connection = self.get_connection(self.conn_id)
+        return self.connection
+
+    def assure_token(self):
         if not self.token:
-            self.token = self.get_service_token()
+            self.get_service_token()
         if not self.account_id:
-            extras = self.connection.extra_dejson
-            if not 'account_id' in extras:
+            if not 'account_id' in self.connection.extra_dejson:
                 self.get_account_info()
             else:
-                self.account_id = extras['account_id']
-        return self.connection
+                self.account_id = self.connection.extra_dejson['account_id']
 
     def update_token(self):
         self.token = None
-        self.get_conn()
+        self.get_service_token()
 
     def get_service_token(self):
         if self.connection.login and self.connection.password:
@@ -107,11 +108,8 @@ class BeaconHook(BaseHook):
                 'exception retrieveing f5 Beacon account: %s' % ex)
 
     def get_measurements(self):
-        self.get_conn()
         try:
-            if not self.account_id:
-                raise AirflowException(
-                    'can not retrieve known measurements from f5 Beacon without an account ID')
+            self.assure_token()
             headers = {
                 "Content-Type": "application/json",
                 "Authorization": "Bearer %s" % self.token,
@@ -160,11 +158,8 @@ class BeaconHook(BaseHook):
                 'exception retrieveing f5 Beacon measurements: %s' % ex)
 
     def query_metric(self, query, output_line):
-        self.get_conn()
         try:
-            if not self.account_id:
-                raise AirflowException(
-                    'can not query metrics from f5 Beacon without an account ID')
+            self.assure_token()
             headers = {
                 "Content-Type": "application/json",
                 "Authorization": "Bearer %s" % self.token,

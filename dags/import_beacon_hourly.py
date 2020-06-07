@@ -25,7 +25,7 @@ from airflow.operators.bash_operator import BashOperator
 from airflow.utils.dates import days_ago
 from airflow.utils.trigger_rule import TriggerRule
 
-from airflow.operators.f5_beacon_plugin import F5BeaconMetricQueryDailyExporterOperator
+from airflow.operators.f5_beacon_plugin import F5BeaconMetricQueryHourlyExporterOperator
 from airflow.hooks.f5_beacon_plugin import BeaconHook
 
 default_args = {
@@ -40,16 +40,17 @@ default_args = {
 }
 
 dag = DAG(
-    'import_beacon_daily',
+    'import_beacon_hourly',
     default_args=default_args,
-    description='DAG to import dailies from Beacon Query API Output',
-    schedule_interval=timedelta(days=1)
+    description='DAG to import hourlies from Beacon Query API Output',
+    schedule_interval='0 * * * *',
+    catchup=False
 )
 
 beacon_conn_id='beacon_import_f5cs_conn'
 destination_dir='/home/airflow/gcs/data'
 
-t1 = F5BeaconMetricQueryDailyExporterOperator(
+t1 = F5BeaconMetricQueryHourlyExporterOperator(
     task_id='export_metrics_from_beacon',
     beacon_conn_id=beacon_conn_id,
     destination_dir=destination_dir,
@@ -71,7 +72,7 @@ t2 = BashOperator(
 import_command = """
 cd {{ params.destination_dir }}/{{ run_id }}
 for f in *.json; do
-    bq load --replace --source_format=NEWLINE_DELIMITED_JSON {{ params.dataset_name }}.{{ params.table_name_prefix }}_{{ ds.replace('-', '_') }} $f ./schema
+    bq load --noreplace --source_format=NEWLINE_DELIMITED_JSON {{ params.dataset_name }}.{{ params.table_name_prefix }}_{{ ds.replace('-', '_') }} $f ./schema
 done
 """
 
