@@ -59,7 +59,7 @@ t1 = F5BeaconMetricQueryDailyExporterOperator(
 beacon_hook = BeaconHook(beacon_conn_id)
 conn = beacon_hook.get_conn()
 account_id = conn.extra_dejson['account_id']
-dataset_name = "f5_beacon_%s" % account_id.lower().replace('-','_')
+dataset_name = "f5_metric_%s" % account_id.lower().replace('-','_')
 table_name_prefix = "beacon_metrics"
 
 t2 = BashOperator(
@@ -95,5 +95,3 @@ t4 = BashOperator(
 )
 
 t1 >> t2 >> t3 >> t4
-
-

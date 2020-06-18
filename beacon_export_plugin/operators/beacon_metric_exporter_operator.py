@@ -109,27 +109,38 @@ class F5BeaconMetricQueryExporterOperator(BaseOperator):
         for line in lines:
             if line:
                 data = parse_line(line)
-                data['time'] = float(
-                    '.'.join([str(data['time'])[:-9], str(data['time'])[-9:]]))
-                if data['time'] > largest_timestamp:
-                    largest_timestamp = int(data['time'])
-                dt = datetime.datetime.fromtimestamp(int(data['time']))
-                data['datetime'] = dt.strftime('%Y-%m-%d %H:%M:%S.%f')
+                # Transform 
+                ms_timestamp = float(int(data['time']) / 1000000000)
+                dt = datetime.datetime.fromtimestamp(int(ms_timestamp))
+                sql_datetime = dt.strftime('%Y-%m-%d %H:%M:%S.%f')
                 tags_list = []
                 for tn in data['tags']:
                     tags_list.append({
-                        'tag_name': tn,
-                        'tag_value': str(data['tags'][tn])
+                        'tag_k': tn,
+                        'tag_v': str(data['tags'][tn])
                     })
-                data['tags'] = tags_list
                 fields_list = []
                 for fn in data['fields']:
                     fields_list.append({
-                        'field_name': fn,
-                        'field_value': str(data['fields'][fn])
+                        'field_k': fn,
+                        'field_v': str(data['fields'][fn])
                     })
-                data['fields'] = fields_list
-                of.write("%s\n" % json.dumps(data))
+                transformed_data = {
+                    'version': '2020-05-19',
+                    'sourceName': data['measurement'],
+                    'sourceDescription': 'beacon imported %s' % data['measurement'],
+                    'timestamp': ms_timestamp,
+                    'datetime': sql_datetime,
+                    'components': [ 
+                        {
+                            'fields': fields_list,
+                            'tags': tags_list
+                        }
+                    ] 
+                }
+                of.write("%s\n" % json.dumps(transformed_data))
+                if ms_timestamp > largest_timestamp:
+                    largest_timestamp = int(ms_timestamp)
         time.sleep(1)
         of.close()
         return largest_timestamp
@@ -140,19 +151,42 @@ class F5BeaconMetricQueryExporterOperator(BaseOperator):
         return os.path.join(dest_dir, 'line_metrics.json')
 
     def write_schema(self, run_id):
-        schema = [{'name': 'measurement', 'type': 'STRING', 'mode': 'REQUIRED'},
-                  {'name': 'tags',
-                   'type': 'RECORD',
-                   'mode': 'REPEATED',
-                   'fields': [{'name': 'tag_name', 'type': 'STRING', 'mode': 'REQUIRED'},
-                              {'name': 'tag_value', 'type': 'STRING', 'mode': 'NULLABLE'}]},
-                  {'name': 'fields',
-                   'type': 'RECORD',
-                   'mode': 'REPEATED',
-                   'fields': [{'name': 'field_name', 'type': 'STRING', 'mode': 'REQUIRED'},
-                              {'name': 'field_value', 'type': 'STRING', 'mode': 'NULLABLE'}]},
-                  {'name': 'time', 'type': 'FLOAT', 'mode': 'REQUIRED'},
-                  {'name': 'datetime', 'type': 'DATETIME', 'mode': 'REQUIRED'}]
+        # schema = [{'name': 'measurement', 'type': 'STRING', 'mode': 'REQUIRED'},
+        #          {'name': 'tags',
+        #           'type': 'RECORD',
+        #           'mode': 'REPEATED',
+        #           'fields': [{'name': 'tag_name', 'type': 'STRING', 'mode': 'REQUIRED'},
+        #                      {'name': 'tag_value', 'type': 'STRING', 'mode': 'NULLABLE'}]},
+        #          {'name': 'fields',
+        #           'type': 'RECORD',
+        #           'mode': 'REPEATED',
+        #           'fields': [{'name': 'field_name', 'type': 'STRING', 'mode': 'REQUIRED'},
+        #                      {'name': 'field_value', 'type': 'STRING', 'mode': 'NULLABLE'}]},
+        #          {'name': 'timestamp', 'type': 'FLOAT', 'mode': 'REQUIRED'},
+        #          {'name': 'datetime', 'type': 'DATETIME', 'mode': 'REQUIRED'}]
+        schema = [
+            {'name': 'version', 'type': 'STRING', 'mode': 'REQUIRED'},
+            {'name': 'sourceName', 'type': 'STRING', 'mode': 'REQUIRED'},
+            {'name': 'sourceDescription', 'type': 'STRING', 'mode': 'NULLABLE'},
+            {'name': 'components',
+             'type': 'RECORD',
+             'mode': 'REPEATED',
+             'fields': [
+                 {'name': 'tags',
+                  'type': 'RECORD',
+                  'mode': 'REPEATED',
+                  'fields': [{'name': 'tag_k', 'type': 'STRING', 'mode': 'REQUIRED'},
+                             {'name': 'tag_v', 'type': 'STRING', 'mode': 'NULLABLE'}]},
+                 {'name': 'fields',
+                  'type': 'RECORD',
+                  'mode': 'REPEATED',
+                  'fields': [{'name': 'field_k', 'type': 'STRING', 'mode': 'REQUIRED'},
+                             {'name': 'field_v', 'type': 'STRING', 'mode': 'NULLABLE'}]}
+             ]
+             },
+            {'name': 'timestamp', 'type': 'FLOAT', 'mode': 'REQUIRED'},
+            {'name': 'datetime', 'type': 'DATETIME', 'mode': 'REQUIRED'}
+        ]
         dest_dir = os.path.join(self.destination_dir, run_id)
         fn = "%s/schema" % dest_dir
         with open(fn, 'w+') as sf:
@@ -198,7 +232,7 @@ class F5BeaconMetricQueryDailyExporterOperator(F5BeaconMetricQueryExporterOperat
 
 
 class F5BeaconMetricQueryHourlyExporterOperator(F5BeaconMetricQueryExporterOperator):
-    
+
     @apply_defaults
     def __init__(self,  # pylint: disable=too-many-arguments
                  beacon_conn_id: str = 'f5_beacon_default',
@@ -216,7 +250,8 @@ class F5BeaconMetricQueryHourlyExporterOperator(F5BeaconMetricQueryExporterOpera
         account_id = 'primary'
         if 'account_id' in conn.extra_dejson:
             account_id = conn.extra_dejson['account_id']
-        self.stop_timestamp = int(time.mktime(context.get("execution_date").timetuple()))
+        self.stop_timestamp = int(time.mktime(
+            context.get("execution_date").timetuple()))
         self.start_timestamp = self.stop_timestamp - 3600
         self.log.info('Executing extract metrics from f5 Beacon account %s for %s - %s into: %s',
                       account_id, self.start_timestamp, self.stop_timestamp, self.destination_dir)
@@ -230,5 +265,4 @@ class F5BeaconMetricQueryHourlyExporterOperator(F5BeaconMetricQueryExporterOpera
             self.get_measurement_records(
                 measurement, context['dag_run'].run_id)
         self.write_schema(context['dag_run'].run_id)
-
 
