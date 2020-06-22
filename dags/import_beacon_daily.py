@@ -60,25 +60,51 @@ beacon_hook = BeaconHook(beacon_conn_id)
 conn = beacon_hook.get_conn()
 account_id = conn.extra_dejson['account_id']
 dataset_name = "f5_metric_%s" % account_id.lower().replace('-','_')
-table_name_prefix = "beacon_metrics"
+table_name = "beacon_metrics"
+metric_file = "./line_metrics.json" 
+schem_file = "./line_schema.json"
+
+assure_dataset_command = """
+cd {{ params.destination_dir }}/{{ run_id }}
+is_dataset=$(bq ls | grep {{ params.dataset_name }}| wc -l)
+if [ "$is_dataset" != "1" ]
+then
+    bq mk {{ params.dataset_name }}
+fi
+"""
 
 t2 = BashOperator(
     task_id='assure_dataset',
-    bash_command='bq ls {} || bq mk {}'.format(dataset_name, dataset_name),
+    bash_command=assure_dataset_command,
+    params={'destination_dir': destination_dir, 'dataset_name': dataset_name},
+    dag=dag
+)
+
+assure_table_command = """
+cd {{ params.destination_dir }}/{{ run_id }}
+is_table=$(bq ls {{ params.dataset_name }}|grep {{ params.table_name }}| wc -l)
+if [ "$is_table" != "1" ]
+then
+    bq mk --table --schema {{ params.schema_file }} --time_partitioning_field ts {{ params.dataset_name }}.{{ params.table_name }}
+fi
+"""
+
+t3 = BashOperator(
+    task_id='assure_table',
+    bash_command=assure_table_command,
+    params={'destination_dir': destination_dir, 'dataset_name': dataset_name, 'table_name': table_name, 'schema_file': schem_file },
     dag=dag
 )
 
 import_command = """
 cd {{ params.destination_dir }}/{{ run_id }}
-for f in *.json; do
-    bq load --replace --source_format=NEWLINE_DELIMITED_JSON {{ params.dataset_name }}.{{ params.table_name_prefix }}_{{ ds.replace('-', '_') }} $f ./schema
-done
+bq load --source_format=NEWLINE_DELIMITED_JSON {{ params.dataset_name }}.{{ params.table_name }} {{ params.metric_file }} {{ params.schema_file }}
 """
 
-t3 = BashOperator(
+t4 = BashOperator(
     task_id='import_data',
     bash_command=import_command,
-    params={'destination_dir': destination_dir, 'dataset_name': dataset_name, 'table_name_prefix': table_name_prefix },
+    params={'destination_dir': destination_dir, 'dataset_name': dataset_name, 'table_name': table_name, 'metric_file': metric_file, 'schema_file': schem_file},
     dag=dag
 )
 
@@ -86,7 +112,7 @@ cleanup_command="""
 rm -rf {{ params.destination_dir }}/{{ run_id }}
 """
 
-t4 = BashOperator(
+t5 = BashOperator(
     task_id='clean_up',
     trigger_rule=TriggerRule.ALL_DONE,
     bash_command=cleanup_command,
@@ -94,4 +120,4 @@ t4 = BashOperator(
     dag=dag
 )
 
-t1 >> t2 >> t3 >> t4
+t1 >> t2 >> t3 >> t4 >> t5
